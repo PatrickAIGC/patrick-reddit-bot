@@ -126,7 +126,7 @@ except Exception as e:
 # === Patrick 的当前状态（用作上下文保持） ===
 patrick_state = {
     "day": 2,  # 从第2天开始，因为第1天已经发过了
-    "total_km": 5,  # 假设第一天跑了5公里
+    "total_km": 0,  # 假设第一天跑了0公里
     "mood": "determined",  # 第二天的心情
     "struggles": ["muscle soreness"],  # 第二天的挑战
 }
