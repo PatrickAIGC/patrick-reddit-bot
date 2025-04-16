@@ -20,7 +20,6 @@ POST_INTERVAL_HOURS = 6  # 每6小时检查一次是否需要发帖
 MIN_INTERVAL_BETWEEN_POSTS = 1  # 最小间隔（小时）
 
 # === 初始化 Reddit 和 OpenAI ===
-openai.api_key = OPENAI_API_KEY
 reddit = praw.Reddit(
     client_id=CLIENT_ID,
     client_secret=CLIENT_SECRET,
