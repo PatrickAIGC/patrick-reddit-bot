@@ -1,14 +1,13 @@
+import os
+print("👋 Script booting...")  # 第0行日志
+print("ENV CHECK:", os.environ.get("OPENAI_API_KEY")[:5] if os.environ.get("OPENAI_API_KEY") else "None")
 
 import praw
 import openai
 import random
 import time
 from datetime import datetime, timedelta
-import os
 
-print("✅ Script started")
-print("CLIENT_ID:", os.getenv("CLIENT_ID"))
-print("OPENAI_API_KEY:", os.getenv("OPENAI_API_KEY")[:6] if os.getenv("OPENAI_API_KEY") else "NOT SET")
 
 # === 配置信息（请替换为你自己的） ===
 CLIENT_ID = "xGCk3lxmH9nJFh8aygMW-Q"
@@ -109,7 +108,6 @@ def post_to_subreddit(subreddit_name):
 
 # === 主循环 ===
 print("🚀 Patrick GPT Poster started!")
-print("🔁 Entering main loop")
 
 
 while True:
