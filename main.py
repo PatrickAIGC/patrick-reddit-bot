@@ -123,12 +123,14 @@ Title: ...
 Body: ...
 """
     try:
-        response = openai.ChatCompletion.create(
+        # Updated for OpenAI API v1.0.0+
+        client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        response = client.chat.completions.create(
             model="gpt-4",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.8,
         )
-        text = response["choices"][0]["message"]["content"]
+        text = response.choices[0].message.content
         lines = text.strip().split("\n")
         title = ""
         body_lines = []
