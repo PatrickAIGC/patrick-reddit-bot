@@ -102,7 +102,7 @@ def update_post_history(day, title, body):
 
 # === 发帖追踪 ===
 # 设置最后发帖日期为2025年4月17日
-last_post_date = datetime(2025, 4, 16).date()  # 指定最后一次发帖的日期
+last_post_date = datetime(2025, 4, 17).date()  # 指定最后一次发帖的日期
 log_file = "patrick_post_log.txt"
 
 # === 初始化 Reddit ===
@@ -126,7 +126,7 @@ except Exception as e:
 # === Patrick 的当前状态（用作上下文保持） ===
 patrick_state = {
     "day": 2,  # 从第2天开始，因为第1天已经发过了
-    "total_km": 0,  # 假设第一天跑了5公里
+    "total_km": 5,  # 假设第一天跑了5公里
     "mood": "determined",  # 第二天的心情
     "struggles": ["muscle soreness"],  # 第二天的挑战
 }
@@ -169,9 +169,59 @@ def should_post_today():
     log(f"🗓️ 今天已经发过帖子了 ({uk_today})")
     return False
 
+# === 检查是否在发帖时间窗口内 ===
+def is_posting_time():
+    """检查当前时间是否在发帖时间窗口内（英国时间11点到20点）"""
+    uk_now = get_uk_time()
+    hour = uk_now.hour
+    
+    if 11 <= hour < 20:
+        return True
+    else:
+        log(f"⏰ 当前UK时间 {uk_now.strftime('%H:%M')} 超出发帖时间窗口 (11:00-20:00)")
+        return False
+
+# === 根据发帖时间确定训练时段 ===
+def get_training_time_context():
+    """根据当前UK时间确定合适的训练时段描述"""
+    uk_now = get_uk_time()
+    hour = uk_now.hour
+    
+    if 11 <= hour < 13:
+        # 上午11点到下午1点 - 假设是晨跑
+        return {
+            "when": "early morning",
+            "time_desc": "dawn", 
+            "details": "I set my alarm early and dragged myself out of bed while most people were still sleeping. The streets were quiet, and the morning air was crisp."
+        }
+    elif 13 <= hour < 16:
+        # 下午1点到4点 - 假设是早上跑步
+        return {
+            "when": "this morning",
+            "time_desc": "morning", 
+            "details": "I decided to start my day with a run. The morning was bright, and there were already people commuting to work when I hit the pavement."
+        }
+    elif 16 <= hour < 18:
+        # 下午4点到6点 - 假设是午餐时间跑步
+        return {
+            "when": "during my lunch break",
+            "time_desc": "midday", 
+            "details": "I squeezed in a quick run during my lunch break today. It was a perfect way to break up the day and refresh my mind."
+        }
+    else:  # 18-20点
+        # 晚上6点到8点 - 假设是下班后跑步
+        return {
+            "when": "after work",
+            "time_desc": "evening", 
+            "details": "I went for a run after finishing work today. The sunset was beautiful, and there were lots of other runners out enjoying the evening."
+        }
+
 # === GPT 生成发帖内容 ===
 def generate_post():
     log(f"🧠 为r/{TARGET_SUBREDDIT}生成帖子内容...")
+    
+    # 获取与当前时间相符的训练情境
+    time_context = get_training_time_context()
     
     # 准备最近帖子的摘要
     recent_posts_summary = ""
@@ -189,6 +239,9 @@ You've currently run about {patrick_state['total_km']} km total.
 You're feeling {patrick_state['mood']}, and struggling with things like {', '.join(patrick_state['struggles'])}.
 You're sharing your reflections and thoughts on Reddit in r/{TARGET_SUBREDDIT}.
 
+Based on the current time of day, your latest run was {time_context["when"]} in the {time_context["time_desc"]}. 
+Details about your run timing: {time_context["details"]}
+
 Here are summaries of your most recent posts to maintain continuity:
 {recent_posts_summary}
 
@@ -199,6 +252,7 @@ Write a Reddit post for Day {patrick_state['day']} that:
 - Is from Patrick, staying consistent with his background
 - Has a title and a body (formatted clearly)
 - Feels personal and real
+- References your most recent run which happened {time_context["when"]}
 - References things mentioned in your previous posts for continuity
 - Shows progression in your running journey
 - Invites interaction
@@ -281,6 +335,10 @@ def get_available_flairs():
 def post_to_subreddit():
     log(f"🚀 尝试在r/{TARGET_SUBREDDIT}发帖...")
     try:
+        # 获取当前时间上下文
+        time_context = get_training_time_context()
+        log(f"⏰ 当前时间段上下文: 跑步时间为{time_context['when']}")
+        
         title, body = generate_post()
         subreddit = reddit.subreddit(TARGET_SUBREDDIT)
         
@@ -365,7 +423,7 @@ def initialize_subreddit_info():
 def main_loop():
     """主应用循环，提取为函数以便更好地处理错误"""
     health_check_interval = 60 * 30  # 每30分钟检查一次健康状况
-    post_check_interval = 60 * 30    # 每30分钟检查一次是否需要发帖
+    post_check_interval = 60 * 15    # 每15分钟检查一次是否需要发帖
     last_health_check = get_uk_time()
     last_post_check = get_uk_time()
     
@@ -385,35 +443,58 @@ def main_loop():
                 
                 # 检查今天是否已经发过帖子
                 if should_post_today():
-                    try:
-                        # 尝试发帖
-                        post_to_subreddit()
-                        
-                        # 更新Patrick状态
-                        km_run = random.randint(4, 10)
-                        patrick_state["day"] += 1
-                        patrick_state["total_km"] += km_run
-                        log(f"🏃 Patrick前进到第{patrick_state['day']}天并跑了+{km_run}公里")
-                        
-                        # 每7天切换一次情绪和挑战
-                        mood_index = ((patrick_state["day"] - 1) // 7) % len(mood_cycle)
-                        patrick_state["mood"], patrick_state["struggles"] = mood_cycle[mood_index]
-                        log(f"😊 Patrick的情绪更新为: {patrick_state['mood']}")
-                    except Exception as e:
-                        log(f"❌ 发帖到r/{TARGET_SUBREDDIT}失败: {str(e)}", error=True)
-                        log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
-                        # 将在下次检查时再次尝试
+                    # 检查当前是否在发帖时间窗口内
+                    if is_posting_time():
+                        try:
+                            # 尝试发帖
+                            post_to_subreddit()
+                            
+                            # 更新Patrick状态
+                            km_run = random.randint(4, 10)
+                            patrick_state["day"] += 1
+                            patrick_state["total_km"] += km_run
+                            log(f"🏃 Patrick前进到第{patrick_state['day']}天并跑了+{km_run}公里")
+                            
+                            # 每7天切换一次情绪和挑战
+                            mood_index = ((patrick_state["day"] - 1) // 7) % len(mood_cycle)
+                            patrick_state["mood"], patrick_state["struggles"] = mood_cycle[mood_index]
+                            log(f"😊 Patrick的情绪更新为: {patrick_state['mood']}")
+                        except Exception as e:
+                            log(f"❌ 发帖到r/{TARGET_SUBREDDIT}失败: {str(e)}", error=True)
+                            log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
+                            # 将在下次检查时再次尝试
+                    else:
+                        log("⏰ 当前不在发帖时间窗口内 (UK 11:00-20:00)，等待合适时间")
             
-            # 计算到午夜的时间（英国时间）用于日志
+            # 计算状态信息
             uk_now = get_uk_time()
-            uk_tomorrow = (uk_now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-            seconds_to_midnight = (uk_tomorrow - uk_now).total_seconds()
-            hours_to_midnight = seconds_to_midnight / 3600
             
+            # 计算到下一个发帖窗口的时间
+            next_window_time = None
+            if uk_now.hour < 11:
+                # 当前时间早于11点，等到今天11点
+                next_window_time = uk_now.replace(hour=11, minute=0, second=0, microsecond=0)
+            elif uk_now.hour >= 20:
+                # 当前时间晚于20点，等到明天11点
+                next_window_time = (uk_now + timedelta(days=1)).replace(hour=11, minute=0, second=0, microsecond=0)
+            
+            # 如果今天已发帖，计算到明天11点的时间
             if last_post_date == uk_now.date():
-                log(f"⏳ 今天已完成发帖。距离下一个发帖日（英国午夜）还有{hours_to_midnight:.1f}小时")
+                next_window_time = (uk_now + timedelta(days=1)).replace(hour=11, minute=0, second=0, microsecond=0)
+                wait_seconds = (next_window_time - uk_now).total_seconds()
+                wait_hours = wait_seconds / 3600
+                log(f"⏳ 今天已完成发帖。距离下一个发帖窗口（明天UK 11:00）还有{wait_hours:.1f}小时")
+            elif next_window_time:
+                # 如果不在发帖窗口内，显示到下一个窗口的时间
+                wait_seconds = (next_window_time - uk_now).total_seconds()
+                wait_hours = wait_seconds / 3600
+                log(f"⏳ 距离下一个发帖窗口（UK {next_window_time.strftime('%H:%M')}）还有{wait_hours:.1f}小时")
             else:
-                log(f"⏳ 尚未完成今日发帖。现在是英国时间{uk_now.strftime('%H:%M')}，将继续检查")
+                # 在发帖窗口内但尚未发帖
+                window_end = uk_now.replace(hour=20, minute=0, second=0, microsecond=0)
+                remaining_seconds = (window_end - uk_now).total_seconds()
+                remaining_hours = remaining_seconds / 3600
+                log(f"⏳ 当前在发帖窗口内，尚未完成今日发帖。发帖窗口还剩{remaining_hours:.1f}小时结束")
             
             # 睡眠适当时间
             time.sleep(60 * 5)  # 5分钟
@@ -430,6 +511,7 @@ def main_loop():
 # === 脚本启动入口 ===
 log("🚀 Patrick GPT发帖器启动！")
 log(f"🌐 当前配置: 仅发布到r/{TARGET_SUBREDDIT}, 英国时区, 每天一帖")
+log(f"⏰ 发帖时间窗口: 英国时间 11:00-20:00")
 log(f"📊 Patrick当前状态: 第{patrick_state['day']}天, 已跑{patrick_state['total_km']}公里")
 log(f"🧠 已加载历史帖子记录: {len(post_history)}个")
 
