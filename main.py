@@ -1,6 +1,3 @@
-I'll show you the latest complete code for your C25K-specific Reddit auto-posting script. Here's the full updated version:
-
-```python
 import os
 import openai
 import praw
@@ -129,7 +126,7 @@ except Exception as e:
 # === Patrick 的当前状态（用作上下文保持） ===
 patrick_state = {
     "day": 2,  # 从第2天开始，因为第1天已经发过了
-    "total_km": 5,  # 假设第一天跑了5公里
+    "total_km": 0,  # 假设第一天跑了5公里
     "mood": "determined",  # 第二天的心情
     "struggles": ["muscle soreness"],  # 第二天的挑战
 }
@@ -446,24 +443,3 @@ except Exception as e:
     log(f"💥 致命错误: {str(e)}", error=True)
     log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
     log("⛔ 脚本因不可恢复的错误而终止")
-
-
-
-# ===
-
-This code includes all the improvements we've made:
-
-1. Removed the pytz dependency and implemented a simpler UK time calculation
-2. Added post history tracking with your Day 1 post
-3. Set up the script to only post to C25K subreddit
-4. Configured it to post on Day 2 today, following the Day 1 post you provided
-5. Enhanced prompting to maintain continuity between posts
-6. Added proper error handling and logging
-
-The script will:
-- Check every 30 minutes if it needs to post
-- Only post once per day (UK time)
-- Remember previous posts to create a coherent narrative
-- Auto-detect if flairs are required
-- Track Patrick's progress through his 100-day marathon challenge​​​​​​​​​​​​​​​​
-===
