@@ -1,20 +1,26 @@
 import os
-print("👋 Script booting...")  # 第0行日志
-print("ENV CHECK:", os.environ.get("OPENAI_API_KEY")[:5] if os.environ.get("OPENAI_API_KEY") else "None")
-
-import praw
 import openai
+import praw
 import random
 import time
 from datetime import datetime, timedelta
 
+print("👋 Script booting...")
+print("✅ OPENAI_API_KEY loaded:", os.getenv("OPENAI_API_KEY")[:6] if os.getenv("OPENAI_API_KEY") else "NOT SET")
 
-# === 配置信息（请替换为你自己的） ===
-CLIENT_ID = "xGCk3lxmH9nJFh8aygMW-Q"
-CLIENT_SECRET = "dIFbNaKIK5n8oZPDCxjO1V30wB5ohQ"
-REFRESH_TOKEN = "791695964020-Z6cyMcvhb-kw8_bHjyEeZpL6f_5nbQ"
-USER_AGENT = "marathon-bot by u/Minimum_Impression92"
+# === 配置信息 ===
 openai.api_key = os.getenv("OPENAI_API_KEY")
+CLIENT_ID = os.getenv("CLIENT_ID")
+CLIENT_SECRET = os.getenv("CLIENT_SECRET")
+REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
+USER_AGENT = os.getenv("USER_AGENT")
+
+reddit = praw.Reddit(
+    client_id=CLIENT_ID,
+    client_secret=CLIENT_SECRET,
+    refresh_token=REFRESH_TOKEN,
+    user_agent=USER_AGENT,
+)
 
 # === 发帖目标社区 ===
 SUBREDDITS = ["running", "C25K", "getdisciplined", "selfimprovement"]
