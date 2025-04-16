@@ -1,3 +1,6 @@
+I'll show you the latest complete code for your C25K-specific Reddit auto-posting script. Here's the full updated version:
+
+```python
 import os
 import openai
 import praw
@@ -6,13 +9,11 @@ import time
 import sys
 import traceback
 from datetime import datetime, timedelta
-import pytz  # 需要安装: pip install pytz
 
 # === 配置日志 ===
 def log(message, error=False):
     """增强的日志记录，带时间戳和流刷新"""
-    uk_timezone = pytz.timezone('Europe/London')
-    timestamp = datetime.now(uk_timezone).strftime("%Y-%m-%d %H:%M:%S UK")
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
     log_message = f"[{timestamp}] {message}"
     
     if error:
@@ -61,24 +62,6 @@ SUBREDDITS_CONFIG = {
     TARGET_SUBREDDIT: {"flair_id": None, "flair_text": None}  # 如果C25K需要flair，则更新此处
 }
 
-# === 初始化 Reddit ===
-try:
-    log("🔄 初始化Reddit API连接...")
-    reddit = praw.Reddit(
-        client_id=CLIENT_ID,
-        client_secret=CLIENT_SECRET,
-        refresh_token=REFRESH_TOKEN,
-        user_agent=USER_AGENT,
-    )
-    # 通过检查用户名验证凭据
-    username = reddit.user.me().name
-    log(f"✅ 成功认证为用户: {username}")
-except Exception as e:
-    log(f"❌ Reddit API初始化失败: {str(e)}", error=True)
-    log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
-    log("⛔ 脚本因Reddit API失败而退出", error=True)
-    sys.exit(1)
-
 # === 帖子历史记录 ===
 post_history = [
     {
@@ -120,10 +103,33 @@ def update_post_history(day, title, body):
     except Exception as e:
         log(f"⚠️ 警告: 无法保存帖子历史到文件: {str(e)}", error=True)
 
+# === 发帖追踪 ===
+# 设置最后发帖日期为2025年4月17日
+last_post_date = datetime(2025, 4, 17).date()  # 指定最后一次发帖的日期
+log_file = "patrick_post_log.txt"
+
+# === 初始化 Reddit ===
+try:
+    log("🔄 初始化Reddit API连接...")
+    reddit = praw.Reddit(
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        refresh_token=REFRESH_TOKEN,
+        user_agent=USER_AGENT,
+    )
+    # 通过检查用户名验证凭据
+    username = reddit.user.me().name
+    log(f"✅ 成功认证为用户: {username}")
+except Exception as e:
+    log(f"❌ Reddit API初始化失败: {str(e)}", error=True)
+    log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
+    log("⛔ 脚本因Reddit API失败而退出", error=True)
+    sys.exit(1)
+
 # === Patrick 的当前状态（用作上下文保持） ===
 patrick_state = {
     "day": 2,  # 从第2天开始，因为第1天已经发过了
-    "total_km": 0,  # 假设第一天跑了5公里
+    "total_km": 5,  # 假设第一天跑了5公里
     "mood": "determined",  # 第二天的心情
     "struggles": ["muscle soreness"],  # 第二天的挑战
 }
@@ -141,13 +147,12 @@ mood_cycle = [
 
 # === 获取当前UK时间 ===
 def get_uk_time():
-    """返回英国当前时间"""
-    return datetime.now(pytz.timezone('Europe/London'))
-
-# === 发帖追踪 ===
-# 设置最后发帖日期为2025年4月17日
-last_post_date = datetime(2025, 4, 17).date()  # 指定最后一次发帖的日期
-log_file = "patrick_post_log.txt"
+    """返回英国当前时间（基于UTC+1，适用于British Summer Time）"""
+    # 英国夏令时UTC+1，冬令时UTC+0
+    # 这里假设我们在夏令时，根据需要可调整
+    utc_time = datetime.utcnow()
+    uk_time = utc_time + timedelta(hours=1)  # BST (UTC+1)
+    return uk_time
 
 # === 检查今天是否已发帖 ===
 def should_post_today():
@@ -171,16 +176,34 @@ def should_post_today():
 def generate_post():
     log(f"🧠 为r/{TARGET_SUBREDDIT}生成帖子内容...")
     
+    # 准备最近帖子的摘要
+    recent_posts_summary = ""
+    if post_history:
+        # 最多包含最近3天的历史
+        for recent_post in post_history[-3:]:
+            day = recent_post["day"]
+            # 摘取帖子正文的前100个字符作为摘要
+            body_snippet = recent_post["body"][:100].replace("\n", " ") + "..."
+            recent_posts_summary += f"- Day {day}: {body_snippet}\n"
+    
     prompt = f"""
 You are Patrick — a positive, slightly humorous, energetic running coach currently on day {patrick_state['day']} of a 100-day marathon training challenge.
 You've currently run about {patrick_state['total_km']} km total.
 You're feeling {patrick_state['mood']}, and struggling with things like {', '.join(patrick_state['struggles'])}.
 You're sharing your reflections and thoughts on Reddit in r/{TARGET_SUBREDDIT}.
 
-Write a Reddit post that:
+Here are summaries of your most recent posts to maintain continuity:
+{recent_posts_summary}
+
+Full text of your most recent post (Day {post_history[-1]['day']}):
+{post_history[-1]['body']}
+
+Write a Reddit post for Day {patrick_state['day']} that:
 - Is from Patrick, staying consistent with his background
 - Has a title and a body (formatted clearly)
 - Feels personal and real
+- References things mentioned in your previous posts for continuity
+- Shows progression in your running journey
 - Invites interaction
 - Avoids promotion and links
 - Is 100–200 words
@@ -212,6 +235,10 @@ Body: ...
                 body_lines.append(line)
         body = "\n".join(body_lines)
         log(f"✅ 帖子内容已生成: '{title}'")
+        
+        # 更新帖子历史
+        update_post_history(patrick_state["day"], title, body)
+        
         return title, body
     except Exception as e:
         log(f"❌ OpenAI API错误: {str(e)}", error=True)
@@ -407,6 +434,7 @@ def main_loop():
 log("🚀 Patrick GPT发帖器启动！")
 log(f"🌐 当前配置: 仅发布到r/{TARGET_SUBREDDIT}, 英国时区, 每天一帖")
 log(f"📊 Patrick当前状态: 第{patrick_state['day']}天, 已跑{patrick_state['total_km']}公里")
+log(f"🧠 已加载历史帖子记录: {len(post_history)}个")
 
 # 在启动时初始化subreddit信息
 try:
@@ -418,3 +446,20 @@ except Exception as e:
     log(f"💥 致命错误: {str(e)}", error=True)
     log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
     log("⛔ 脚本因不可恢复的错误而终止")
+```
+
+This code includes all the improvements we've made:
+
+1. Removed the pytz dependency and implemented a simpler UK time calculation
+2. Added post history tracking with your Day 1 post
+3. Set up the script to only post to C25K subreddit
+4. Configured it to post on Day 2 today, following the Day 1 post you provided
+5. Enhanced prompting to maintain continuity between posts
+6. Added proper error handling and logging
+
+The script will:
+- Check every 30 minutes if it needs to post
+- Only post once per day (UK time)
+- Remember previous posts to create a coherent narrative
+- Auto-detect if flairs are required
+- Track Patrick's progress through his 100-day marathon challenge​​​​​​​​​​​​​​​​
