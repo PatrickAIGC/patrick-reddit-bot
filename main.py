@@ -6,11 +6,13 @@ import time
 import sys
 import traceback
 from datetime import datetime, timedelta
+import pytz  # 需要安装: pip install pytz
 
-# === Configure Logging ===
+# === 配置日志 ===
 def log(message, error=False):
-    """Enhanced logging with timestamps and stream flushing"""
-    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    """增强的日志记录，带时间戳和流刷新"""
+    uk_timezone = pytz.timezone('Europe/London')
+    timestamp = datetime.now(uk_timezone).strftime("%Y-%m-%d %H:%M:%S UK")
     log_message = f"[{timestamp}] {message}"
     
     if error:
@@ -18,14 +20,14 @@ def log(message, error=False):
     else:
         print(log_message)
     
-    # Force flush to ensure logs appear immediately
+    # 强制刷新以确保日志立即显示
     sys.stdout.flush()
     sys.stderr.flush()
 
-# Start with clear status messages
-log("👋 Script booting...")
+# 以清晰的状态消息开始
+log("👋 脚本启动中...")
 
-# === Check Environment Variables ===
+# === 检查环境变量 ===
 required_env_vars = [
     "OPENAI_API_KEY", 
     "CLIENT_ID", 
@@ -36,15 +38,15 @@ required_env_vars = [
 
 missing_vars = [var for var in required_env_vars if not os.getenv(var)]
 if missing_vars:
-    log(f"❌ ERROR: Missing required environment variables: {', '.join(missing_vars)}", error=True)
-    log("⛔ Exiting script due to missing configuration", error=True)
+    log(f"❌ 错误: 缺少必要的环境变量: {', '.join(missing_vars)}", error=True)
+    log("⛔ 脚本因配置缺失而退出", error=True)
     sys.exit(1)
 
-# Log successful env var loading
+# 记录环境变量加载成功
 for var in required_env_vars:
     value = os.getenv(var)
-    masked_value = f"{value[:3]}...{value[-3:]}" if value else "NOT SET"
-    log(f"✅ {var} loaded: {masked_value}")
+    masked_value = f"{value[:3]}...{value[-3:]}" if value else "未设置"
+    log(f"✅ {var} 已加载: {masked_value}")
 
 # === 配置信息 ===
 openai.api_key = os.getenv("OPENAI_API_KEY")
@@ -53,40 +55,77 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
 USER_AGENT = os.getenv("USER_AGENT")
 
-# === 发帖目标社区 ===
-SUBREDDITS = ["C25K", "getdisciplined", "selfimprovement","marathon_training","runningwithdogs","getdisciplined"]
-POST_INTERVAL_HOURS = 6  # 每6小时检查一次是否需要发帖
-MIN_INTERVAL_BETWEEN_POSTS = 1  # 最小间隔（小时）
+# === 发帖目标社区配置 ===
+TARGET_SUBREDDIT = "C25K"  # 只在C25K社区发帖
+SUBREDDITS_CONFIG = {
+    TARGET_SUBREDDIT: {"flair_id": None, "flair_text": None}  # 如果C25K需要flair，则更新此处
+}
 
 # === 初始化 Reddit ===
 try:
-    log("🔄 Initializing Reddit API connection...")
+    log("🔄 初始化Reddit API连接...")
     reddit = praw.Reddit(
         client_id=CLIENT_ID,
         client_secret=CLIENT_SECRET,
         refresh_token=REFRESH_TOKEN,
         user_agent=USER_AGENT,
     )
-    # Verify credentials by checking username
+    # 通过检查用户名验证凭据
     username = reddit.user.me().name
-    log(f"✅ Successfully authenticated as: {username}")
+    log(f"✅ 成功认证为用户: {username}")
 except Exception as e:
-    log(f"❌ Reddit API initialization failed: {str(e)}", error=True)
-    log(f"Stack trace: {traceback.format_exc()}", error=True)
-    log("⛔ Exiting script due to Reddit API failure", error=True)
+    log(f"❌ Reddit API初始化失败: {str(e)}", error=True)
+    log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
+    log("⛔ 脚本因Reddit API失败而退出", error=True)
     sys.exit(1)
 
-# === 发帖追踪 ===
-last_post_time = {}
-last_global_post_time = None
-log_file = "patrick_post_log.txt"
+# === 帖子历史记录 ===
+post_history = [
+    {
+        "day": 1,
+        "title": "Day 1: Every marathon journey starts with a single step!",  # 假设标题
+        "body": """This is Patrick here, your humble running coach and newbie marathon trainee. So, today is DAY 1 of my grand 100-day marathon training challenge, and guess what? I've successfully run a grand total of... 0 km. Yep, you read that right! I know some of you are thinking, "Oh, that's not a great start, Patrick." But hey, every journey, even a 42.195 km one, starts with a single step, right?
+
+I've got to admit, the toughest part was not the run itself, but getting out of bed in the pre-dawn darkness. Trust me, the struggle is real! But the post-run exhilaration, wow, it's worth every sleepy-eyed curse word I muttered this morning.
+
+I'd love to hear how you guys deal with the early morning hustle. Do you have any tricks up your sleeve to make waking up less of a battle? Any funny stories to share?
+
+Here's to the next 99 days and beyond! Let's hit the track, metaphorically or otherwise, and support each other on this journey.
+
+Keep running, keep smiling!
+
+Patrick"""
+    }
+]
+
+# 更新历史记录函数
+def update_post_history(day, title, body):
+    """将新帖子添加到历史记录中"""
+    post_history.append({
+        "day": day,
+        "title": title,
+        "body": body
+    })
+    # 保持历史记录不超过7天（最近一周）
+    if len(post_history) > 7:
+        post_history.pop(0)
+    
+    # 同时保存到永久存储
+    try:
+        with open("post_history.txt", "a", encoding="utf-8") as f:
+            f.write(f"\n\n===== DAY {day} =====\n")
+            f.write(f"Title: {title}\n\n")
+            f.write(body)
+            f.write("\n\n----------\n")
+    except Exception as e:
+        log(f"⚠️ 警告: 无法保存帖子历史到文件: {str(e)}", error=True)
 
 # === Patrick 的当前状态（用作上下文保持） ===
 patrick_state = {
-    "day": 1,
-    "total_km": 0,
-    "mood": "optimistic",
-    "struggles": ["early mornings"],
+    "day": 2,  # 从第2天开始，因为第1天已经发过了
+    "total_km": 0,  # 假设第一天跑了5公里
+    "mood": "determined",  # 第二天的心情
+    "struggles": ["muscle soreness"],  # 第二天的挑战
 }
 
 # === 情绪变化日历（每7天切换一次） ===
@@ -100,15 +139,43 @@ mood_cycle = [
     ("grateful", ["the long journey"]),
 ]
 
+# === 获取当前UK时间 ===
+def get_uk_time():
+    """返回英国当前时间"""
+    return datetime.now(pytz.timezone('Europe/London'))
+
+# === 发帖追踪 ===
+# 设置最后发帖日期为2025年4月17日
+last_post_date = datetime(2025, 4, 17).date()  # 指定最后一次发帖的日期
+log_file = "patrick_post_log.txt"
+
+# === 检查今天是否已发帖 ===
+def should_post_today():
+    """检查今天（按英国时区）是否需要发帖"""
+    uk_now = get_uk_time()
+    uk_today = uk_now.date()
+    
+    if last_post_date is None:
+        log(f"🗓️ 尚未发过帖子，今天需要发帖")
+        return True
+        
+    # 如果最后发帖日期不是今天，则需要发帖
+    if last_post_date != uk_today:
+        log(f"🗓️ 最后发帖日期是 {last_post_date}，今天是 {uk_today}，需要发帖")
+        return True
+    
+    log(f"🗓️ 今天已经发过帖子了 ({uk_today})")
+    return False
+
 # === GPT 生成发帖内容 ===
-def generate_post(subreddit_name):
-    log(f"🧠 Generating post content for r/{subreddit_name}...")
+def generate_post():
+    log(f"🧠 为r/{TARGET_SUBREDDIT}生成帖子内容...")
     
     prompt = f"""
 You are Patrick — a positive, slightly humorous, energetic running coach currently on day {patrick_state['day']} of a 100-day marathon training challenge.
 You've currently run about {patrick_state['total_km']} km total.
 You're feeling {patrick_state['mood']}, and struggling with things like {', '.join(patrick_state['struggles'])}.
-You're sharing your reflections and thoughts on Reddit in r/{subreddit_name}.
+You're sharing your reflections and thoughts on Reddit in r/{TARGET_SUBREDDIT}.
 
 Write a Reddit post that:
 - Is from Patrick, staying consistent with his background
@@ -117,13 +184,15 @@ Write a Reddit post that:
 - Invites interaction
 - Avoids promotion and links
 - Is 100–200 words
+- For C25K community, shows understanding of beginner runners facing the couch-to-5k challenge, while still maintaining your marathon training journey
+- Offers encouragement that relates to both your journey and theirs
 
 Output format:
 Title: ...
 Body: ...
 """
     try:
-        # Updated for OpenAI API v1.0.0+
+        # 使用OpenAI API v1.0.0+
         client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         response = client.chat.completions.create(
             model="gpt-4",
@@ -142,116 +211,210 @@ Body: ...
             else:
                 body_lines.append(line)
         body = "\n".join(body_lines)
-        log(f"✅ Post content generated: '{title}'")
+        log(f"✅ 帖子内容已生成: '{title}'")
         return title, body
     except Exception as e:
-        log(f"❌ OpenAI API error: {str(e)}", error=True)
-        log(f"Stack trace: {traceback.format_exc()}", error=True)
+        log(f"❌ OpenAI API错误: {str(e)}", error=True)
+        log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
         raise
 
 # === 保存日志 ===
-def log_post(subreddit_name, title, body):
+def log_post(title, body):
     try:
         with open(log_file, "a", encoding="utf-8") as f:
-            f.write(f"[{datetime.utcnow().isoformat()}] r/{subreddit_name}\nTitle: {title}\nBody:\n{body}\n\n---\n\n")
-        log(f"📝 Post logged to {log_file}")
+            uk_time = get_uk_time().isoformat()
+            f.write(f"[{uk_time}] r/{TARGET_SUBREDDIT}\nTitle: {title}\nBody:\n{body}\n\n---\n\n")
+        log(f"📝 帖子已记录到 {log_file}")
     except Exception as e:
-        log(f"⚠️ Warning: Failed to write to log file: {str(e)}", error=True)
+        log(f"⚠️ 警告: 写入日志文件失败: {str(e)}", error=True)
+
+# === 获取子版块的可用 flair ===
+def get_available_flairs():
+    """尝试获取subreddit的可用flairs并记录"""
+    try:
+        subreddit = reddit.subreddit(TARGET_SUBREDDIT)
+        flairs = list(subreddit.flair.link_templates.user_selectable())
+        log(f"📋 r/{TARGET_SUBREDDIT}的可用flairs: 找到{len(flairs)}个")
+        
+        # 记录可用的flairs以供参考
+        for flair in flairs[:5]:  # 限制为前5个以避免日志过多
+            flair_id = flair["id"] if "id" in flair else "未知"
+            flair_text = flair["text"] if "text" in flair else "未知"
+            log(f"   - Flair: '{flair_text}' (ID: {flair_id})")
+        
+        if len(flairs) > 5:
+            log(f"   - ... 以及另外 {len(flairs) - 5} 个flairs")
+            
+        return flairs
+    except Exception as e:
+        log(f"⚠️ 警告: 无法获取r/{TARGET_SUBREDDIT}的flairs: {str(e)}", error=True)
+        # 如果获得403错误，说明我们没有权限获取flairs
+        if "403" in str(e):
+            log(f"ℹ️ 将为r/{TARGET_SUBREDDIT}使用直接flair分配")
+        return []
 
 # === 发帖函数 ===
-def post_to_subreddit(subreddit_name):
-    log(f"🚀 Attempting to post to r/{subreddit_name}...")
+def post_to_subreddit():
+    log(f"🚀 尝试在r/{TARGET_SUBREDDIT}发帖...")
     try:
-        title, body = generate_post(subreddit_name)
-        subreddit = reddit.subreddit(subreddit_name)
-        submission = subreddit.submit(title, selftext=body)
-        log(f"✅ Successfully posted to r/{subreddit_name}: {submission.url}")
-        log_post(subreddit_name, title, body)
+        title, body = generate_post()
+        subreddit = reddit.subreddit(TARGET_SUBREDDIT)
+        
+        # 获取flair配置
+        flair_config = SUBREDDITS_CONFIG.get(TARGET_SUBREDDIT, {})
+        flair_id = flair_config.get("flair_id")
+        flair_text = flair_config.get("flair_text")
+        
+        # 如果没有配置flair但可能需要，尝试获取可用的flairs
+        if not flair_id and not flair_text:
+            flairs = get_available_flairs()
+            if flairs:
+                flair = flairs[0]
+                flair_id = flair.get("id")
+                flair_text = flair.get("text")
+                log(f"📌 自动选择flair: '{flair_text}'")
+        
+        # 如果有flair则使用
+        if flair_id or flair_text:
+            log(f"📌 使用flair: ID={flair_id}, Text='{flair_text}'")
+            submission = subreddit.submit(title, selftext=body, flair_id=flair_id, flair_text=flair_text)
+        else:
+            log(f"ℹ️ 没有flair配置，发帖时不使用flair")
+            submission = subreddit.submit(title, selftext=body)
+            
+        log(f"✅ 成功发帖到r/{TARGET_SUBREDDIT}: {submission.url}")
+        log_post(title, body)
+        
+        # 更新最后发帖日期为今天（英国时区）
+        global last_post_date
+        last_post_date = get_uk_time().date()
+        
         return submission
     except Exception as e:
-        log(f"❌ Error posting to r/{subreddit_name}: {str(e)}", error=True)
-        log(f"Stack trace: {traceback.format_exc()}", error=True)
+        log(f"❌ 发帖到r/{TARGET_SUBREDDIT}出错: {str(e)}", error=True)
+        log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
         raise
 
 # === 健康检查 ===
 def health_check():
-    """Perform periodic health checks to confirm script is still running properly"""
+    """执行定期健康检查以确认脚本仍在正常运行"""
     try:
-        # Check Reddit connection
+        # 检查Reddit连接
         username = reddit.user.me().name
-        log(f"💓 Health check: Reddit API connection OK (user: {username})")
+        uk_time = get_uk_time().strftime("%H:%M:%S")
+        log(f"💓 健康检查: Reddit API连接正常 (用户: {username}), 英国当前时间: {uk_time}")
         
-        # Log Patrick's current state
-        log(f"💓 Health: Patrick on day {patrick_state['day']}, {patrick_state['total_km']} km run, feeling {patrick_state['mood']}")
+        # 记录Patrick的当前状态
+        log(f"💓 健康: Patrick在第{patrick_state['day']}天, 已跑{patrick_state['total_km']}公里, 感觉{patrick_state['mood']}")
         
         return True
     except Exception as e:
-        log(f"⚠️ Health check failed: {str(e)}", error=True)
+        log(f"⚠️ 健康检查失败: {str(e)}", error=True)
         return False
 
-# === 主循环 ===
-log("🚀 Patrick GPT Poster started!")
-
-health_check_interval = 60 * 60  # Check health every hour
-last_health_check = datetime.utcnow()
-
-while True:
+# === 启动时获取子版块信息 ===
+def initialize_subreddit_info():
+    log("🔍 获取subreddit信息...")
     try:
-        now = datetime.utcnow()
+        # 验证我们可以访问subreddit
+        subreddit = reddit.subreddit(TARGET_SUBREDDIT)
         
-        # Periodic health check
-        if (now - last_health_check).total_seconds() >= health_check_interval:
-            health_check()
-            last_health_check = now
-        
-        # Check if we need to wait for the minimum interval
-        if last_global_post_time and (now - last_global_post_time).total_seconds() < MIN_INTERVAL_BETWEEN_POSTS * 3600:
-            wait_time_mins = (MIN_INTERVAL_BETWEEN_POSTS * 3600 - (now - last_global_post_time).total_seconds()) / 60
-            log(f"⏳ Waiting for minimum posting interval ({wait_time_mins:.1f} minutes remaining)")
-            time.sleep(300)  # Sleep for 5 minutes before checking again
-            continue
-        
-        # Check each subreddit
-        for sub in SUBREDDITS:
-            last_time = last_post_time.get(sub)
-            # Post once per day to each subreddit
-            should_post = not last_time or (now - last_time).total_seconds() >= 60 * 60 * 24
+        # 获取subreddit规则以检查发帖要求
+        try:
+            rules = list(subreddit.rules)
+            log(f"📋 r/{TARGET_SUBREDDIT}: 找到{len(rules)}条规则")
             
-            if should_post:
-                try:
-                    post_to_subreddit(sub)
-                    last_post_time[sub] = now
-                    last_global_post_time = now
-                    
-                    # 更新 Patrick 状态
-                    km_run = random.randint(4, 10)
-                    patrick_state["day"] += 1
-                    patrick_state["total_km"] += km_run
-                    log(f"🏃 Patrick progressed to day {patrick_state['day']} and ran +{km_run}km")
-                    
-                    # 每 7 天切换一次情绪和挑战
-                    mood_index = ((patrick_state["day"] - 1) // 7) % len(mood_cycle)
-                    patrick_state["mood"], patrick_state["struggles"] = mood_cycle[mood_index]
-                    log(f"😊 Patrick's mood updated to: {patrick_state['mood']}")
-                    
-                    # Success, now sleep before next subreddit to avoid rate limits
-                    time.sleep(60 * 5)  # Sleep 5 minutes between posts
-                except Exception as e:
-                    log(f"❌ Failed to post to r/{sub}: {str(e)}", error=True)
-                    # Sleep for a bit to avoid hammering APIs in case of failure
-                    time.sleep(60 * 15)  # Sleep 15 minutes after failure
+            # 检查规则中是否提到flair要求
+            flair_required = any("flair" in rule.description.lower() for rule in rules if hasattr(rule, 'description'))
+            if flair_required:
+                log(f"⚠️ r/{TARGET_SUBREDDIT}可能需要flair（根据规则）")
+        except Exception as e:
+            log(f"⚠️ 无法获取r/{TARGET_SUBREDDIT}的规则: {str(e)}", error=True)
         
-        log(f"⏳ Sleeping for {POST_INTERVAL_HOURS} hours before next post check...")
-        # Sleep in smaller chunks so we can perform health checks
-        for _ in range(POST_INTERVAL_HOURS * 12):  # 12 checks per hour
-            time.sleep(300)  # 5 minutes
-            health_check()
-            
-    except KeyboardInterrupt:
-        log("👋 Script manually stopped via keyboard interrupt")
-        break
+        # 尝试获取flairs
+        get_available_flairs()
+        
     except Exception as e:
-        log(f"‼️ Unexpected error in main loop: {str(e)}", error=True)
-        log(f"Stack trace: {traceback.format_exc()}", error=True)
-        log("🔄 Continuing main loop after error")
-        time.sleep(300)  # Sleep for 5 minutes before continuing
+        log(f"⚠️ 无法初始化r/{TARGET_SUBREDDIT}的信息: {str(e)}", error=True)
+
+# === 主循环 ===
+def main_loop():
+    """主应用循环，提取为函数以便更好地处理错误"""
+    health_check_interval = 60 * 30  # 每30分钟检查一次健康状况
+    post_check_interval = 60 * 30    # 每30分钟检查一次是否需要发帖
+    last_health_check = get_uk_time()
+    last_post_check = get_uk_time()
+    
+    while True:
+        try:
+            now = get_uk_time()
+            
+            # 定期健康检查
+            if (now - last_health_check).total_seconds() >= health_check_interval:
+                health_check()
+                last_health_check = now
+            
+            # 检查是否需要发帖
+            if (now - last_post_check).total_seconds() >= post_check_interval:
+                log("🔍 检查是否需要发帖...")
+                last_post_check = now
+                
+                # 检查今天是否已经发过帖子
+                if should_post_today():
+                    try:
+                        # 尝试发帖
+                        post_to_subreddit()
+                        
+                        # 更新Patrick状态
+                        km_run = random.randint(4, 10)
+                        patrick_state["day"] += 1
+                        patrick_state["total_km"] += km_run
+                        log(f"🏃 Patrick前进到第{patrick_state['day']}天并跑了+{km_run}公里")
+                        
+                        # 每7天切换一次情绪和挑战
+                        mood_index = ((patrick_state["day"] - 1) // 7) % len(mood_cycle)
+                        patrick_state["mood"], patrick_state["struggles"] = mood_cycle[mood_index]
+                        log(f"😊 Patrick的情绪更新为: {patrick_state['mood']}")
+                    except Exception as e:
+                        log(f"❌ 发帖到r/{TARGET_SUBREDDIT}失败: {str(e)}", error=True)
+                        log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
+                        # 将在下次检查时再次尝试
+            
+            # 计算到午夜的时间（英国时间）用于日志
+            uk_now = get_uk_time()
+            uk_tomorrow = (uk_now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+            seconds_to_midnight = (uk_tomorrow - uk_now).total_seconds()
+            hours_to_midnight = seconds_to_midnight / 3600
+            
+            if last_post_date == uk_now.date():
+                log(f"⏳ 今天已完成发帖。距离下一个发帖日（英国午夜）还有{hours_to_midnight:.1f}小时")
+            else:
+                log(f"⏳ 尚未完成今日发帖。现在是英国时间{uk_now.strftime('%H:%M')}，将继续检查")
+            
+            # 睡眠适当时间
+            time.sleep(60 * 5)  # 5分钟
+                
+        except KeyboardInterrupt:
+            log("👋 脚本被手动停止（键盘中断）")
+            break
+        except Exception as e:
+            log(f"‼️ 主循环中意外错误: {str(e)}", error=True)
+            log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
+            log("🔄 错误后继续主循环")
+            time.sleep(60 * 5)  # 错误后等待5分钟再继续
+
+# === 脚本启动入口 ===
+log("🚀 Patrick GPT发帖器启动！")
+log(f"🌐 当前配置: 仅发布到r/{TARGET_SUBREDDIT}, 英国时区, 每天一帖")
+log(f"📊 Patrick当前状态: 第{patrick_state['day']}天, 已跑{patrick_state['total_km']}公里")
+
+# 在启动时初始化subreddit信息
+try:
+    initialize_subreddit_info()
+    
+    # 开始主循环
+    main_loop()
+except Exception as e:
+    log(f"💥 致命错误: {str(e)}", error=True)
+    log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
+    log("⛔ 脚本因不可恢复的错误而终止")
