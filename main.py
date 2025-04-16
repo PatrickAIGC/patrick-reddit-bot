@@ -446,7 +446,10 @@ except Exception as e:
     log(f"💥 致命错误: {str(e)}", error=True)
     log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
     log("⛔ 脚本因不可恢复的错误而终止")
-```
+
+
+
+# ===
 
 This code includes all the improvements we've made:
 
@@ -463,3 +466,4 @@ The script will:
 - Remember previous posts to create a coherent narrative
 - Auto-detect if flairs are required
 - Track Patrick's progress through his 100-day marathon challenge​​​​​​​​​​​​​​​​
+===
