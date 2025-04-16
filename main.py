@@ -53,8 +53,27 @@ CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
 USER_AGENT = os.getenv("USER_AGENT")
 
-# === 发帖目标社区 ===
-SUBREDDITS = ["running", "C25K", "getdisciplined", "selfimprovement"]
+# === 发帖目标社区及对应的 flair ===
+SUBREDDITS_CONFIG = {
+    "running": {"flair_id": None, "flair_text": "Training"},  # We're using "Training" flair for r/running
+    "C25K": {"flair_id": None, "flair_text": None},  # Update with appropriate flair if required
+    "getdisciplined": {"flair_id": None, "flair_text": None},  # Update with appropriate flair if required
+    "selfimprovement": {"flair_id": None, "flair_text": None},  # Update with appropriate flair if required
+}
+
+# Additional flair options for r/running if "Training" isn't available or appropriate
+RUNNING_FLAIRS = [
+    "Training", 
+    "Article", 
+    "Weekly Thread", 
+    "Monthly Thread", 
+    "Nutrition", 
+    "Race Report", 
+    "Review", 
+    "PSA", 
+    "Safety"
+]
+SUBREDDITS = list(SUBREDDITS_CONFIG.keys())
 POST_INTERVAL_HOURS = 6  # 每6小时检查一次是否需要发帖
 MIN_INTERVAL_BETWEEN_POSTS = 1  # 最小间隔（小时）
 
@@ -158,13 +177,76 @@ def log_post(subreddit_name, title, body):
     except Exception as e:
         log(f"⚠️ Warning: Failed to write to log file: {str(e)}", error=True)
 
+# === 获取子版块的可用 flair ===
+def get_available_flairs(subreddit_name):
+    """Retrieves available flairs for a subreddit and logs them"""
+    try:
+        subreddit = reddit.subreddit(subreddit_name)
+        flairs = list(subreddit.flair.link_templates.user_selectable())
+        log(f"📋 Available flairs for r/{subreddit_name}: {len(flairs)} flairs found")
+        
+        # Log the available flairs for reference
+        for flair in flairs[:5]:  # Limit to first 5 to avoid excessive logging
+            flair_id = flair["id"] if "id" in flair else "Unknown"
+            flair_text = flair["text"] if "text" in flair else "Unknown"
+            log(f"   - Flair: '{flair_text}' (ID: {flair_id})")
+        
+        if len(flairs) > 5:
+            log(f"   - ... and {len(flairs) - 5} more flairs")
+            
+        return flairs
+    except Exception as e:
+        log(f"⚠️ Warning: Failed to get flairs for r/{subreddit_name}: {str(e)}", error=True)
+        return []
+
 # === 发帖函数 ===
 def post_to_subreddit(subreddit_name):
     log(f"🚀 Attempting to post to r/{subreddit_name}...")
     try:
         title, body = generate_post(subreddit_name)
         subreddit = reddit.subreddit(subreddit_name)
-        submission = subreddit.submit(title, selftext=body)
+        
+        # Get flair configuration
+        flair_config = SUBREDDITS_CONFIG.get(subreddit_name, {})
+        flair_id = flair_config.get("flair_id")
+        flair_text = flair_config.get("flair_text")
+        
+        # Special handling for r/running based on extracted flair options
+        if subreddit_name == "running":
+            # Try using "Training" flair first
+            if "Training" in RUNNING_FLAIRS:
+                flair_text = "Training"
+                log(f"📌 Using 'Training' flair for post in r/running")
+        
+        # If no flair is configured but the subreddit might require it,
+        # try to get available flairs and find a matching one
+        if not flair_id and (not flair_text or subreddit_name == "running"):
+            flairs = get_available_flairs(subreddit_name)
+            if flairs:
+                # For r/running, try to match one of our known flairs
+                if subreddit_name == "running":
+                    for flair in flairs:
+                        if "text" in flair and flair["text"] in RUNNING_FLAIRS:
+                            flair_id = flair.get("id")
+                            flair_text = flair.get("text")
+                            log(f"📌 Found matching flair: '{flair_text}' for r/{subreddit_name}")
+                            break
+                
+                # If still no match, just use the first available flair
+                if not flair_id and not flair_text:
+                    flair = flairs[0]
+                    flair_id = flair.get("id")
+                    flair_text = flair.get("text")
+                    log(f"📌 Auto-selected flair: '{flair_text}' for r/{subreddit_name}")
+        
+        # Submit post with flair if available
+        if flair_id or flair_text:
+            log(f"📌 Using flair: ID={flair_id}, Text='{flair_text}' for post in r/{subreddit_name}")
+            submission = subreddit.submit(title, selftext=body, flair_id=flair_id, flair_text=flair_text)
+        else:
+            log(f"⚠️ No flair configured for r/{subreddit_name}, attempting to post without flair")
+            submission = subreddit.submit(title, selftext=body)
+            
         log(f"✅ Successfully posted to r/{subreddit_name}: {submission.url}")
         log_post(subreddit_name, title, body)
         return submission
@@ -189,8 +271,35 @@ def health_check():
         log(f"⚠️ Health check failed: {str(e)}", error=True)
         return False
 
+# === 启动时获取子版块信息 ===
+def initialize_subreddit_info():
+    log("🔍 Retrieving subreddit information and available flairs...")
+    for sub in SUBREDDITS:
+        try:
+            # Verify we can access the subreddit
+            subreddit = reddit.subreddit(sub)
+            # Get subreddit rules to check posting requirements
+            rules = list(subreddit.rules)
+            log(f"📋 r/{sub}: Found {len(rules)} rules")
+            
+            # Check for flair requirement mentions in the rules
+            flair_required = any("flair" in rule.description.lower() for rule in rules if hasattr(rule, 'description'))
+            if flair_required:
+                log(f"⚠️ r/{sub} likely requires flair based on rules")
+            
+            # Get available flairs
+            get_available_flairs(sub)
+            
+            # Wait a bit between API calls to avoid rate limiting
+            time.sleep(2)
+        except Exception as e:
+            log(f"⚠️ Could not initialize info for r/{sub}: {str(e)}", error=True)
+
 # === 主循环 ===
 log("🚀 Patrick GPT Poster started!")
+
+# Initialize subreddit information at startup
+initialize_subreddit_info()
 
 health_check_interval = 60 * 60  # Check health every hour
 last_health_check = datetime.utcnow()
@@ -219,6 +328,13 @@ while True:
             
             if should_post:
                 try:
+                    # Update flair information before posting if needed
+                    if not SUBREDDITS_CONFIG[sub]["flair_id"] and not SUBREDDITS_CONFIG[sub]["flair_text"]:
+                        flairs = get_available_flairs(sub)
+                        if flairs:
+                            SUBREDDITS_CONFIG[sub]["flair_id"] = flairs[0].get("id")
+                            SUBREDDITS_CONFIG[sub]["flair_text"] = flairs[0].get("text")
+                    
                     post_to_subreddit(sub)
                     last_post_time[sub] = now
                     last_global_post_time = now
