@@ -116,7 +116,7 @@ def update_post_history(day, title, body):
 
 # === 发帖追踪 ===
 # 设置最后发帖日期为2025年4月17日
-last_post_date = datetime(2025, 4, 17).date()  # 指定最后一次发帖的日期
+last_post_date = datetime(2025, 4, 16).date()  # 指定最后一次发帖的日期
 log_file = "patrick_post_log.txt"
 
 # === 评论追踪 ===
@@ -147,7 +147,7 @@ except Exception as e:
 # === Patrick 的当前状态（用作上下文保持） ===
 patrick_state = {
     "day": 2,  # 从第2天开始，因为第1天已经发过了
-    "total_km": 5,  # 假设第一天跑了5公里
+    "total_km": 0,  # 假设第一天跑了5公里
     "mood": "determined",  # 第二天的心情
     "struggles": ["muscle soreness"],  # 第二天的挑战
 }
