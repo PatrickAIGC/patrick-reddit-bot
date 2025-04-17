@@ -59,6 +59,20 @@ SUBREDDITS_CONFIG = {
     TARGET_SUBREDDIT: {"flair_id": None, "flair_text": None}  # 如果C25K需要flair，则更新此处
 }
 
+# === 评论目标社区与关键词 ===
+COMMENT_SUBREDDITS = ["marathontraining", "getdisciplined", "runningwithdogs", "selfimprovement", "nba", "askreddit", "todayilearned"]
+# 更宽泛的关键词，增加匹配几率以提高karma
+KEYWORDS = ["run", "running", "train", "training", "struggle", "struggling", "motivation", "motivate", 
+           "plan", "planning", "start", "begin", "beginning", "days", "week", "month", "journey", 
+           "goal", "goals", "fitness", "exercise", "routine", "habit", "progress", "challenge", 
+           "advice", "help", "tips", "question", "experience", "story", "update", "achievement"]
+
+# === 时间和评论限制参数 ===
+INTERVAL_BETWEEN_COMMENTS = 10  # 每两条评论间隔（分钟）
+MIN_DAILY_COMMENTS = 20  # 每天至少评论数
+MAX_DAILY_COMMENTS = 30  # 每天最多评论数
+MAX_COMMENT_LENGTH = 800
+
 # === 帖子历史记录 ===
 post_history = [
     {
@@ -102,8 +116,15 @@ def update_post_history(day, title, body):
 
 # === 发帖追踪 ===
 # 设置最后发帖日期为2025年4月17日
-last_post_date = datetime(2025, 4, 16).date()  # 指定最后一次发帖的日期
+last_post_date = datetime(2025, 4, 17).date()  # 指定最后一次发帖的日期
 log_file = "patrick_post_log.txt"
+
+# === 评论追踪 ===
+commented_ids = set()
+comment_count = 0
+last_reset_date = datetime.now().date()
+last_comment_time = None
+comment_log_file = "comment_log.txt"
 
 # === 初始化 Reddit ===
 try:
@@ -126,7 +147,7 @@ except Exception as e:
 # === Patrick 的当前状态（用作上下文保持） ===
 patrick_state = {
     "day": 2,  # 从第2天开始，因为第1天已经发过了
-    "total_km": 0,  # 假设第一天跑了0公里
+    "total_km": 5,  # 假设第一天跑了5公里
     "mood": "determined",  # 第二天的心情
     "struggles": ["muscle soreness"],  # 第二天的挑战
 }
@@ -296,7 +317,87 @@ Body: ...
         log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
         raise
 
-# === 保存日志 ===
+# === GPT 生成评论内容 ===
+def generate_comment(title, content, subreddit_name):
+    """根据不同的subreddit生成适合的评论内容"""
+    log(f"🧠 为r/{subreddit_name}生成评论内容...")
+    
+    # 根据不同的 subreddit 调整 prompt，专注于增加karma
+    if subreddit_name.lower() == "nba":
+        prompt = f"""
+You're a knowledgeable basketball fan responding to the following post on r/NBA:
+Title: {title}
+Content: {content}
+
+Write a comment that will likely get upvotes. Be enthusiastic, slightly humorous, and show basketball knowledge without being too technical. 
+Avoid controversial takes that might get downvoted. Instead, go with the general consensus or popular opinion.
+Occasionally add a clever joke or reference that NBA fans would appreciate.
+
+Keep it under {MAX_COMMENT_LENGTH} characters and make it sound natural and conversational.
+"""
+    elif subreddit_name.lower() == "askreddit":
+        prompt = f"""
+You're responding to this AskReddit post:
+Title: {title}
+Content: {content}
+
+Write a comment that is likely to get upvotes. AskReddit users love:
+1. Relatable personal stories with a dash of humor
+2. Unique perspectives or surprising answers
+3. Emotional honesty that others connect with
+4. Comments that are easy to read and engaging
+
+Write as if you're a real person sharing an authentic experience or thought. Avoid being generic.
+Keep it under {MAX_COMMENT_LENGTH} characters and aim to prompt others to upvote and reply.
+"""
+    elif subreddit_name.lower() == "todayilearned":
+        prompt = f"""
+You're responding to this TodayILearned post:
+Title: {title}
+Content: {content}
+
+Write a comment that is likely to get upvotes. TIL users appreciate:
+1. Additional fascinating facts related to the original post
+2. Historical context or surprising connections
+3. Clear explanations that enhance understanding
+4. Thoughtful questions that prompt discussion
+
+Add value to the original post with your knowledge while keeping it accessible.
+Keep it under {MAX_COMMENT_LENGTH} characters and make your comment interesting enough that people will want to upvote it.
+"""
+    else:
+        prompt = f"""
+You're responding to this post on r/{subreddit_name}:
+Title: {title}
+Content: {content}
+
+Write a supportive and helpful comment that is likely to get upvotes. Focus on:
+1. Being genuinely encouraging and positive
+2. Showing that you've read and understood their situation
+3. Offering practical, actionable advice based on personal experience
+4. Including a personal touch that makes your comment stand out
+
+Mention how consistent, structured approaches (like daily habits or multi-day plans) can help build momentum.
+Keep it under {MAX_COMMENT_LENGTH} characters and sound like a real supportive Reddit user, not generic advice.
+"""
+
+    try:
+        # 使用OpenAI API v1.0.0+
+        client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7,
+        )
+        comment_text = response.choices[0].message.content.strip()
+        log(f"✅ 评论内容已生成: '{comment_text[:50]}...'")
+        return comment_text
+    except Exception as e:
+        log(f"❌ OpenAI API错误: {str(e)}", error=True)
+        log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
+        raise
+
+# === 保存发帖日志 ===
 def log_post(title, body):
     try:
         with open(log_file, "a", encoding="utf-8") as f:
@@ -305,6 +406,16 @@ def log_post(title, body):
         log(f"📝 帖子已记录到 {log_file}")
     except Exception as e:
         log(f"⚠️ 警告: 写入日志文件失败: {str(e)}", error=True)
+
+# === 保存评论日志 ===
+def log_comment(subreddit, post_title, comment):
+    try:
+        with open(comment_log_file, "a", encoding="utf-8") as f:
+            timestamp = datetime.now().isoformat()
+            f.write(f"[{timestamp}] r/{subreddit} - {post_title}\nComment: {comment}\n\n---\n\n")
+        log(f"📝 评论已记录到 {comment_log_file}")
+    except Exception as e:
+        log(f"⚠️ 警告: 写入评论日志文件失败: {str(e)}", error=True)
 
 # === 获取子版块的可用 flair ===
 def get_available_flairs():
@@ -377,6 +488,110 @@ def post_to_subreddit():
         log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
         raise
 
+# === 评论函数 ===
+def post_comment():
+    global comment_count, last_comment_time
+    
+    # 重置评论计数器(如果是新的一天)
+    current_date = datetime.now().date()
+    if current_date != last_reset_date:
+        log(f"🔄 新的一天 ({current_date})，评论计数器已重置")
+        comment_count = 0
+        last_reset_date = current_date
+    
+    # 检查是否达到每日上限
+    if comment_count >= MAX_DAILY_COMMENTS:
+        log(f"⛔️ 已达到每日评论上限 ({MAX_DAILY_COMMENTS})，今天不再评论")
+        return False
+    
+    # 为不同的subreddit设置权重，优先考虑高karma的subreddit
+    sub_weights = {
+        "askreddit": 5,    # 流量最高，给最高权重
+        "nba": 4,          # 活跃度高
+        "todayilearned": 4, # 活跃度高
+        "selfimprovement": 2,
+        "marathontraining": 1,
+        "getdisciplined": 2,
+        "runningwithdogs": 1
+    }
+    
+    # 加权随机选择subreddit
+    sub_items = list(sub_weights.items())
+    sub_names = [item[0] for item in sub_items]
+    sub_weights_values = [item[1] for item in sub_items]
+    
+    sub = random.choices(sub_names, weights=sub_weights_values, k=1)[0]
+    log(f"🔍 检查r/{sub} (高karma潜力: {'高' if sub in ['askreddit', 'nba', 'todayilearned'] else '中等'})...")
+    
+    subreddit = reddit.subreddit(sub)
+    posts_checked = 0
+    comment_posted = False
+    
+    # 为不同类型的 subreddit 使用不同的浏览策略
+    if sub.lower() in ["nba", "askreddit", "todayilearned"]:
+        # 对高karma潜力的subreddit，优先查看热门和上升中的帖子
+        posts_to_check = []
+        
+        # 获取热门帖子
+        hot_posts = list(subreddit.hot(limit=5))
+        rising_posts = list(subreddit.rising(limit=5))
+        new_posts = list(subreddit.new(limit=5))
+        
+        posts_to_check.extend(hot_posts)
+        posts_to_check.extend(rising_posts)
+        posts_to_check.extend(new_posts)
+        
+        # 随机打乱顺序，避免总是评论同类型帖子
+        random.shuffle(posts_to_check)
+        
+        for post in posts_to_check:
+            posts_checked += 1
+            
+            # 对新增的 subreddit 对热门帖子进行评论，提高karma获取几率
+            if post.id not in commented_ids and post.score > 10:  # 评论有更高赞数的帖子，更容易获得karma
+                try:
+                    log(f"📝 正在为r/{sub}的帖子生成评论: {post.title}")
+                    comment_text = generate_comment(post.title, post.selftext, sub)
+                    log(f"💬 评论: {comment_text[:50]}...")
+                    
+                    post.reply(comment_text)
+                    commented_ids.add(post.id)
+                    comment_count += 1
+                    last_comment_time = time.time()
+                    log(f"✅ 已在r/{sub}发表评论。今日总计: {comment_count}/{MIN_DAILY_COMMENTS}")
+                    log_comment(sub, post.title, comment_text)
+                    comment_posted = True
+                    break
+                except Exception as e:
+                    log(f"❌ 在r/{sub}发表评论时出错: {str(e)}", error=True)
+    else:
+        # 原有的 subreddit 使用关键词筛选
+        for post in subreddit.new(limit=10):
+            posts_checked += 1
+            
+            if post.id in commented_ids:
+                continue
+                
+            if any(k in post.title.lower() for k in KEYWORDS):
+                try:
+                    log(f"📝 正在为r/{sub}的帖子生成评论: {post.title}")
+                    comment_text = generate_comment(post.title, post.selftext, sub)
+                    log(f"💬 评论: {comment_text[:50]}...")
+                    
+                    post.reply(comment_text)
+                    commented_ids.add(post.id)
+                    comment_count += 1
+                    last_comment_time = time.time()
+                    log(f"✅ 已在r/{sub}发表评论。今日总计: {comment_count}/{MIN_DAILY_COMMENTS}")
+                    log_comment(sub, post.title, comment_text)
+                    comment_posted = True
+                    break
+                except Exception as e:
+                    log(f"❌ 在r/{sub}发表评论时出错: {str(e)}", error=True)
+    
+    log(f"👀 已检查r/{sub}中的{posts_checked}个帖子" + (", 找到匹配项!" if comment_posted else ", 未找到合适的帖子."))
+    return comment_posted
+
 # === 健康检查 ===
 def health_check():
     """执行定期健康检查以确认脚本仍在正常运行"""
@@ -388,6 +603,9 @@ def health_check():
         
         # 记录Patrick的当前状态
         log(f"💓 健康: Patrick在第{patrick_state['day']}天, 已跑{patrick_state['total_km']}公里, 感觉{patrick_state['mood']}")
+        
+        # 记录评论状态
+        log(f"💓 评论状态: 今日已发表{comment_count}/{MIN_DAILY_COMMENTS}条评论")
         
         return True
     except Exception as e:
@@ -419,17 +637,45 @@ def initialize_subreddit_info():
     except Exception as e:
         log(f"⚠️ 无法初始化r/{TARGET_SUBREDDIT}的信息: {str(e)}", error=True)
 
+# === 计算评论间隔 ===
+def calculate_comment_interval():
+    """计算下一条评论的最佳间隔时间"""
+    current_date = datetime.now().date()
+    current_time = datetime.now()
+    
+    # 计算当天剩余时间（秒）
+    seconds_left_today = (datetime(current_date.year, current_date.month, current_date.day, 23, 59, 59) - current_time).total_seconds()
+    
+    # 计算确保达到每日最低目标所需的评论速度
+    comments_needed = MIN_DAILY_COMMENTS - comment_count
+    if comments_needed > 0 and seconds_left_today > 0:
+        required_interval_seconds = seconds_left_today / comments_needed
+        actual_interval_seconds = min(INTERVAL_BETWEEN_COMMENTS * 60, required_interval_seconds)
+    else:
+        actual_interval_seconds = INTERVAL_BETWEEN_COMMENTS * 60
+    
+    return actual_interval_seconds
+
 # === 主循环 ===
 def main_loop():
     """主应用循环，提取为函数以便更好地处理错误"""
+    global last_comment_time, comment_count, last_reset_date
+    
     health_check_interval = 60 * 30  # 每30分钟检查一次健康状况
     post_check_interval = 60 * 15    # 每15分钟检查一次是否需要发帖
+    comment_check_interval = 60 * 5  # 每5分钟检查一次是否需要评论
+    
     last_health_check = get_uk_time()
     last_post_check = get_uk_time()
+    last_comment_check = datetime.now()
+    
+    # 初始化评论计数和日期
+    last_reset_date = datetime.now().date()
     
     while True:
         try:
             now = get_uk_time()
+            current_time = datetime.now()
             
             # 定期健康检查
             if (now - last_health_check).total_seconds() >= health_check_interval:
@@ -466,7 +712,38 @@ def main_loop():
                     else:
                         log("⏰ 当前不在发帖时间窗口内 (UK 11:00-20:00)，等待合适时间")
             
-            # 计算状态信息
+            # 检查是否需要评论
+            if (current_time - last_comment_check).total_seconds() >= comment_check_interval:
+                log("🔍 检查是否需要发表评论...")
+                last_comment_check = current_time
+                
+                # 检查今天的评论数是否已达到上限
+                if comment_count >= MAX_DAILY_COMMENTS:
+                    log(f"⛔️ 已达到每日评论上限 ({MAX_DAILY_COMMENTS})，今天不再评论")
+                else:
+                    # 检查是否需要等待上一条评论的间隔时间
+                    if last_comment_time:
+                        ideal_interval = calculate_comment_interval()
+                        time_since_last_comment = time.time() - last_comment_time
+                        if time_since_last_comment < ideal_interval:
+                            wait_time = int(ideal_interval - time_since_last_comment)
+                            log(f"🕒 距离下一条评论还需等待 {wait_time} 秒...")
+                        else:
+                            # 尝试发表评论
+                            try:
+                                post_comment()
+                            except Exception as e:
+                                log(f"❌ 发表评论失败: {str(e)}", error=True)
+                                log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
+                    else:
+                        # 第一次评论，直接发表
+                        try:
+                            post_comment()
+                        except Exception as e:
+                            log(f"❌ 发表评论失败: {str(e)}", error=True)
+                            log(f"堆栈跟踪: {traceback.format_exc()}", error=True)
+            
+            # 计算发帖状态信息
             uk_now = get_uk_time()
             
             # 计算到下一个发帖窗口的时间
@@ -496,8 +773,15 @@ def main_loop():
                 remaining_hours = remaining_seconds / 3600
                 log(f"⏳ 当前在发帖窗口内，尚未完成今日发帖。发帖窗口还剩{remaining_hours:.1f}小时结束")
             
+            # 计算评论状态信息
+            comments_left = MIN_DAILY_COMMENTS - comment_count
+            if comments_left > 0:
+                log(f"⏳ 今日还需发表 {comments_left} 条评论以达到最低目标")
+            else:
+                log(f"✅ 今日评论最低目标已达成! 已发表 {comment_count}/{MIN_DAILY_COMMENTS} 条评论")
+            
             # 睡眠适当时间
-            time.sleep(60 * 5)  # 5分钟
+            time.sleep(60 * 1)  # 1分钟检查一次状态
                 
         except KeyboardInterrupt:
             log("👋 脚本被手动停止（键盘中断）")
@@ -509,11 +793,13 @@ def main_loop():
             time.sleep(60 * 5)  # 错误后等待5分钟再继续
 
 # === 脚本启动入口 ===
-log("🚀 Patrick GPT发帖器启动！")
-log(f"🌐 当前配置: 仅发布到r/{TARGET_SUBREDDIT}, 英国时区, 每天一帖")
+log("🚀 Reddit多功能机器人启动！")
+log(f"🌐 发帖配置: 仅发布到r/{TARGET_SUBREDDIT}, 英国时区, 每天一帖")
 log(f"⏰ 发帖时间窗口: 英国时间 11:00-20:00")
 log(f"📊 Patrick当前状态: 第{patrick_state['day']}天, 已跑{patrick_state['total_km']}公里")
 log(f"🧠 已加载历史帖子记录: {len(post_history)}个")
+log(f"💬 评论配置: 目标每日{MIN_DAILY_COMMENTS}-{MAX_DAILY_COMMENTS}条评论")
+log(f"🎯 评论目标社区: {', '.join(['r/' + sub for sub in COMMENT_SUBREDDITS])}")
 
 # 在启动时初始化subreddit信息
 try:
