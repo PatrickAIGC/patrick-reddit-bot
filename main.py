@@ -489,8 +489,9 @@ def post_to_subreddit():
         raise
 
 # === 评论函数 ===
+# === 评论函数 ===
 def post_comment():
-    global comment_count, last_comment_time
+    global comment_count, last_comment_time, last_reset_date
     
     # 重置评论计数器(如果是新的一天)
     current_date = datetime.now().date()
